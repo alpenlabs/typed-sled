@@ -3,6 +3,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache-blue.svg)](https://opensource.org/licenses/apache-2-0)
 [![ci](https://github.com/alpenlabs/typed-sled/actions/workflows/lint.yml/badge.svg?event=push)](https://github.com/alpenlabs/typed-sled/actions)
+[![Documentation](https://img.shields.io/badge/docs-latest-blue.svg)](https://alpenlabs.github.io/typed-sled/)
 
 A type-safe wrapper around the [sled](https://github.com/spacejam/sled) embedded database.
 
