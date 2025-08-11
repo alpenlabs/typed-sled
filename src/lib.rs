@@ -67,12 +67,19 @@
 //! }
 //! ```
 
+/// Batch operations for multiple key-value pairs.
 pub mod batch;
+/// Codec traits and errors for serialization/deserialization.
 pub mod codec;
+/// Database wrapper around sled with type safety.
 pub mod db;
+/// Error types and utilities.
 pub mod error;
+/// Schema trait and tree name definitions.
 pub mod schema;
+/// Transaction support with retry policies.
 pub mod transaction;
+/// Type-safe tree operations.
 pub mod tree;
 
 #[cfg(test)]

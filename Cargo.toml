@@ -17,7 +17,7 @@ rust.unreachable_pub = "warn"
 rust.unused_crate_dependencies = "deny"
 rust.unused_must_use = "deny"
 rust.unexpected_cfgs = { level = "warn", check-cfg = [
-    'cfg(coverage, coverage_nightly)',
+  'cfg(coverage, coverage_nightly)',
 ] }
 rust.missing_docs = "warn"
 rustdoc.all = "warn"

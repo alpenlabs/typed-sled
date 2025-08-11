@@ -3,7 +3,6 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache-blue.svg)](https://opensource.org/licenses/apache-2-0)
 [![ci](https://github.com/alpenlabs/typed-sled/actions/workflows/lint.yml/badge.svg?event=push)](https://github.com/alpenlabs/typed-sled/actions)
-[![docs](https://img.shields.io/badge/docs-docs.rs-orange)](https://docs.rs/typed-sled)
 
 A type-safe wrapper around the [sled](https://github.com/spacejam/sled) embedded database.
 
@@ -155,7 +154,7 @@ Schemas define the structure of your data by specifying:
 ### Codecs
 
 Codecs handle serialization/deserialization:
-- **KeyCodec**: Built-in implementations for integers, strings, and byte arrays
+- **KeyCodec**: Built-in implementations for all integer types (`u8`, `u16`, `u32`, `u64`, `u128`, `i8`, `i16`, `i32`, `i64`, `i128`), strings, and byte arrays
 - **ValueCodec**: You implement this for your custom types
 
 ### Error Handling

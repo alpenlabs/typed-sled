@@ -21,8 +21,11 @@ impl From<&'static str> for TreeName {
 
 /// Defines the schema for a typed tree with associated key and value types.
 pub trait Schema: Debug + Send + Sync + Sized {
+    /// The name of the tree in the database.
     const TREE_NAME: TreeName;
 
+    /// The key type for this schema.
     type Key: KeyCodec<Self>;
+    /// The value type for this schema.
     type Value: ValueCodec<Self>;
 }

@@ -19,12 +19,16 @@ pub trait Backoff {
 /// Exponential backoff strategy.
 #[derive(Debug, Clone)]
 pub struct ExponentialBackoff {
+    /// Base delay in milliseconds.
     pub base_delay_ms: u64,
+    /// Multiplier for exponential growth.
     pub multiplier: f64,
+    /// Maximum delay in milliseconds.
     pub max_delay_ms: u64,
 }
 
 impl ExponentialBackoff {
+    /// Creates a new exponential backoff strategy.
     pub fn new(base_delay_ms: u64, multiplier: f64, max_delay_ms: u64) -> Self {
         Self {
             base_delay_ms,
@@ -58,12 +62,16 @@ impl Backoff for ExponentialBackoff {
 /// Linear backoff strategy.
 #[derive(Debug, Clone)]
 pub struct LinearBackoff {
+    /// Base delay in milliseconds.
     pub base_delay_ms: u64,
+    /// Increment per retry in milliseconds.
     pub increment_ms: u64,
+    /// Maximum delay in milliseconds.
     pub max_delay_ms: u64,
 }
 
 impl LinearBackoff {
+    /// Creates a new linear backoff strategy.
     pub fn new(base_delay_ms: u64, increment_ms: u64, max_delay_ms: u64) -> Self {
         Self {
             base_delay_ms,
@@ -96,10 +104,12 @@ impl Backoff for LinearBackoff {
 /// Constant backoff strategy.
 #[derive(Debug, Clone)]
 pub struct ConstantBackoff {
+    /// Constant delay in milliseconds.
     pub delay_ms: u64,
 }
 
 impl ConstantBackoff {
+    /// Creates a new constant backoff strategy.
     pub fn new(delay_ms: u64) -> Self {
         Self { delay_ms }
     }
@@ -123,6 +133,7 @@ impl Backoff for ConstantBackoff {
 
 /// Trait for performing transactions on typed sled trees.
 pub trait SledTransactional {
+    /// The transactional view type.
     type View;
 
     /// Executes a function within a transaction context.

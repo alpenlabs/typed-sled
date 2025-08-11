@@ -8,21 +8,28 @@ pub enum CodecError {
     /// Key has invalid length for the expected type.
     #[error("invalid key length in '{schema}' (expected {expected} bytes, got {actual})")]
     InvalidKeyLength {
+        /// The schema name where the error occurred.
         schema: &'static str,
+        /// The expected key length in bytes.
         expected: usize,
+        /// The actual key length in bytes.
         actual: usize,
     },
     /// Value serialization failed.
     #[error("failed to serialize schema '{schema}' value")]
     SerializationFailed {
+        /// The schema name where the error occurred.
         schema: &'static str,
+        /// The underlying serialization error.
         #[source]
         source: Box<dyn std::error::Error>,
     },
     /// Value deserialization failed.
     #[error("failed to deserialize schema '{schema}' value")]
     DeserializationFailed {
+        /// The schema name where the error occurred.
         schema: &'static str,
+        /// The underlying deserialization error.
         #[source]
         source: Box<dyn std::error::Error>,
     },
@@ -35,6 +42,7 @@ pub enum CodecError {
     Other(String),
 }
 
+/// Result type for codec operations.
 pub type CodecResult<T> = Result<T, CodecError>;
 
 /// Trait for encoding and decoding keys for a specific schema.

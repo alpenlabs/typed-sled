@@ -1,3 +1,5 @@
+//! Basic usage example for typed-sled.
+
 use borsh::{BorshDeserialize, BorshSerialize};
 use dashmap as _;
 use thiserror as _;
