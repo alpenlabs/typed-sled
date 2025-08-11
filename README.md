@@ -23,7 +23,8 @@ Add this to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-typed-sled = "0.1.0"
+typed-sled = { git = "https://github.com/alpenlabs/typed-sled" }
+# Optionally for serialization
 borsh = { version = "1.5", features = ["derive"] }
 ```
 
