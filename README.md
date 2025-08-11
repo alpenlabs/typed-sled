@@ -23,7 +23,8 @@ Add this to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-typed-sled = "0.1.0"
+typed-sled = { git = "https://github.com/alpenlabs/typed-sled" }
+# Optionally for serialization
 borsh = { version = "1.5", features = ["derive"] }
 ```
 
@@ -95,22 +96,53 @@ fn main() -> Result<()> {
 ### Transactions
 
 ```rust
-use typed_sled::transaction::{BackoffStrategy, ExponentialBackoff, TransactionOptions};
+use typed_sled::{CodecError, Schema, TreeName, ValueCodec};
+use typed_sled::transaction::{SledTransactional, ExponentialBackoff};
 
-let tx_opts = TransactionOptions::default()
-    .with_backoff_strategy(ExponentialBackoff::new(10, 2.0, 1000))
-    .with_max_retries(5);
+// Define another schema for settings
+#[derive(Debug)]
+struct SettingsSchema;
 
-db.transaction(tx_opts, |tx| {
-    let users = tx.get_tree::<UserSchema>()?;
-    let settings = tx.get_tree::<SettingsSchema>()?;
-    
-    // Atomic operations across multiple trees
-    users.insert(&1, &user1)?;
-    settings.insert(&"theme", &"dark")?;
-    
-    Ok(())
-})?;
+impl Schema for SettingsSchema {
+    const TREE_NAME: TreeName = TreeName("settings");
+    type Key = String;
+    type Value = String;
+}
+
+impl ValueCodec<SettingsSchema> for String {
+    fn encode_value(&self) -> typed_sled::CodecResult<Vec<u8>> {
+        Ok(self.as_bytes().to_vec())
+    }
+
+    fn decode_value(buf: &[u8]) -> typed_sled::CodecResult<Self> {
+        String::from_utf8(buf.to_vec()).map_err(|e| CodecError::DeserializationFailed {
+            schema: SettingsSchema::TREE_NAME.0,
+            source: e.into(),
+        })
+    }
+}
+
+// Get trees and perform transaction
+let users = db.get_tree::<UserSchema>()?;
+let settings = db.get_tree::<SettingsSchema>()?;
+
+let user1 = User {
+    id: 1,
+    name: "Alice".to_string(),
+    email: "alice@example.com".to_string(),
+};
+
+(&users, &settings).transaction_with_retry(
+    ExponentialBackoff::new(10, 2.0, 1000),
+    5,
+    |(tx_users, tx_settings)| {
+        // Atomic operations across multiple trees
+        tx_users.insert(&1, &user1)?;
+        tx_settings.insert(&"theme".to_string(), &"dark".to_string())?;
+        
+        Ok(())
+    }
+)?;
 ```
 
 ### Range Queries
@@ -134,12 +166,23 @@ for result in users.range(1..=100) {
 ```rust
 use typed_sled::batch::SledBatch;
 
-let mut batch = SledBatch::default();
-batch.insert::<UserSchema>(&1, &user1);
-batch.insert::<UserSchema>(&2, &user2);
-batch.remove::<UserSchema>(&3);
+let user1 = User {
+    id: 1,
+    name: "Alice".to_string(),
+    email: "alice@example.com".to_string(),
+};
+let user2 = User {
+    id: 2,
+    name: "Bob".to_string(),
+    email: "bob@example.com".to_string(),
+};
 
-users.apply_batch(&batch)?;
+let mut batch = SledBatch::<UserSchema>::default();
+batch.insert(1, user1)?;
+batch.insert(2, user2)?;
+batch.remove(3)?;
+
+users.apply_batch(batch)?;
 ```
 
 ## Key Concepts
