@@ -145,7 +145,7 @@ pub trait SledTransactional {
     /// Only retries on storage conflicts, not on user aborts.
     fn transaction_with_retry<F, R, E>(
         &self,
-        backoff: &impl Backoff,
+        backoff: &dyn Backoff,
         max_retries: usize,
         func: F,
     ) -> TransactionResult<R, E>
