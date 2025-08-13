@@ -143,15 +143,14 @@ pub trait SledTransactional {
 
     /// Executes a function within a transaction context with retry and backoff.
     /// Only retries on storage conflicts, not on user aborts.
-    fn transaction_with_retry<F, R, E, B>(
+    fn transaction_with_retry<F, R, E>(
         &self,
-        backoff: B,
+        backoff: &impl Backoff,
         max_retries: usize,
         func: F,
     ) -> TransactionResult<R, E>
     where
         F: Fn(Self::View) -> ConflictableTransactionResult<R, E>,
-        B: Backoff,
     {
         let mut attempts = 0;
         let mut delay_ms = backoff.base_delay_ms();
@@ -427,7 +426,7 @@ mod tests {
 
         let backoff = ExponentialBackoff::new(1, 2.0, 100);
         let result: TransactionResult<(), crate::error::Error> =
-            (&tree1,).transaction_with_retry(backoff, 3, |(tx_tree1,)| {
+            (&tree1,).transaction_with_retry(&backoff, 3, |(tx_tree1,)| {
                 let value = TestValue::alice();
                 tx_tree1.insert(&1, &value)?;
                 Ok(())
@@ -444,7 +443,7 @@ mod tests {
 
         let backoff = LinearBackoff::new(1, 2, 50);
         let result: TransactionResult<(), crate::error::Error> =
-            (&tree1,).transaction_with_retry(backoff, 3, |(tx_tree1,)| {
+            (&tree1,).transaction_with_retry(&backoff, 3, |(tx_tree1,)| {
                 let value = TestValue::alice();
                 tx_tree1.insert(&1, &value)?;
                 Ok(())
@@ -461,7 +460,7 @@ mod tests {
 
         let backoff = ConstantBackoff::new(5);
         let result: TransactionResult<(), crate::error::Error> =
-            (&tree1,).transaction_with_retry(backoff, 2, |(tx_tree1,)| {
+            (&tree1,).transaction_with_retry(&backoff, 2, |(tx_tree1,)| {
                 let value = TestValue::alice();
                 tx_tree1.insert(&1, &value)?;
                 Ok(())
@@ -478,7 +477,7 @@ mod tests {
 
         let backoff = ConstantBackoff::new(1);
         let result: TransactionResult<(), &'static str> =
-            (&tree1,).transaction_with_retry(backoff, 3, |(tx_tree1,)| {
+            (&tree1,).transaction_with_retry(&backoff, 3, |(tx_tree1,)| {
                 let _ = tx_tree1.insert(&1, &TestValue::alice());
                 Err(sled::transaction::ConflictableTransactionError::Abort(
                     "intentional abort",
