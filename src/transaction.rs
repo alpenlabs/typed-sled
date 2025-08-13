@@ -8,7 +8,7 @@ use sled::{
 use crate::{Schema, SledTree, tree::SledTransactionalTree};
 
 /// Backoff policy trait for retry logic.
-pub trait Backoff {
+pub trait Backoff: core::fmt::Debug + Send + Sync {
     /// Base delay in ms.
     fn base_delay_ms(&self) -> u64;
 
