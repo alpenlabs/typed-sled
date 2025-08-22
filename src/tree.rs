@@ -160,6 +160,7 @@ impl<S: Schema> SledTransactionalTree<S> {
         let key = key.encode_key()?;
         let value = value.encode_value()?;
         self.inner.insert(key, value)?;
+        self.inner.flush();
         Ok(())
     }
 
@@ -181,6 +182,7 @@ impl<S: Schema> SledTransactionalTree<S> {
     pub fn remove(&self, key: &S::Key) -> Result<()> {
         let key = key.encode_key()?;
         self.inner.remove(key)?;
+        self.inner.flush();
         Ok(())
     }
 }
