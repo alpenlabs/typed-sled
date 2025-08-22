@@ -99,6 +99,7 @@ impl<S: Schema> SledTree<S> {
         let old = old.as_ref().map(S::Value::encode_value).transpose()?;
         let new = new.as_ref().map(S::Value::encode_value).transpose()?;
         self.inner.compare_and_swap(key, old, new)??;
+        self.inner.flush()?;
         Ok(())
     }
 
