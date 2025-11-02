@@ -301,6 +301,105 @@ mod tests {
     }
 
     #[test]
+    fn test_single_tree_transaction_take() {
+        let db = create_test_db().unwrap();
+        let tree1 = db.get_tree::<TestSchema1>().unwrap();
+
+        // Insert initial data
+        tree1.insert(&1, &TestValue::alice()).unwrap();
+
+        let result: TransactionResult<TestValue, crate::error::Error> =
+            (&tree1,).transaction(|(tx_tree1,)| {
+                assert!(tx_tree1.contains_key(&1)?);
+                let taken = tx_tree1.take(&1)?;
+                assert!(taken.is_some());
+                assert!(!tx_tree1.contains_key(&1)?);
+                Ok(taken.unwrap())
+            });
+
+        assert!(result.is_ok());
+        let taken_value = result.unwrap();
+        assert_test_values_eq(&taken_value, &TestValue::alice());
+
+        // Verify data removed after transaction
+        assert!(!tree1.contains_key(&1).unwrap());
+    }
+
+    #[test]
+    fn test_transaction_take_nonexistent() {
+        let db = create_test_db().unwrap();
+        let tree1 = db.get_tree::<TestSchema1>().unwrap();
+
+        let result: TransactionResult<Option<TestValue>, crate::error::Error> =
+            (&tree1,).transaction(|(tx_tree1,)| {
+                let taken = tx_tree1.take(&999)?;
+                assert!(taken.is_none());
+                Ok(taken)
+            });
+
+        assert!(result.is_ok());
+        assert!(result.unwrap().is_none());
+    }
+
+    #[test]
+    fn test_transaction_take_and_reinsert() {
+        let db = create_test_db().unwrap();
+        let tree1 = db.get_tree::<TestSchema1>().unwrap();
+
+        // Insert initial data
+        tree1.insert(&1, &TestValue::alice()).unwrap();
+
+        let result: TransactionResult<(), crate::error::Error> =
+            (&tree1,).transaction(|(tx_tree1,)| {
+                // Take the value
+                let taken = tx_tree1.take(&1)?.unwrap();
+                assert_test_values_eq(&taken, &TestValue::alice());
+
+                // Reinsert with different value
+                tx_tree1.insert(&1, &TestValue::bob())?;
+                Ok(())
+            });
+
+        assert!(result.is_ok());
+
+        // Verify new value persisted
+        let value = tree1.get(&1).unwrap().unwrap();
+        assert_test_values_eq(&value, &TestValue::bob());
+    }
+
+    #[test]
+    fn test_multi_tree_transaction_take() {
+        let db = create_test_db().unwrap();
+        let tree1 = db.get_tree::<TestSchema1>().unwrap();
+        let tree2 = db.get_tree::<TestSchema2>().unwrap();
+
+        // Insert initial data
+        tree1.insert(&1, &TestValue::alice()).unwrap();
+        tree2.insert(&2, &TestValue::bob()).unwrap();
+
+        let result: TransactionResult<(TestValue, TestValue), crate::error::Error> =
+            (&tree1, &tree2).transaction(|(tx_tree1, tx_tree2)| {
+                let taken1 = tx_tree1.take(&1)?.unwrap();
+                let taken2 = tx_tree2.take(&2)?.unwrap();
+
+                // Both should be removed within transaction
+                assert!(!tx_tree1.contains_key(&1)?);
+                assert!(!tx_tree2.contains_key(&2)?);
+
+                Ok((taken1, taken2))
+            });
+
+        assert!(result.is_ok());
+        let (taken1, taken2) = result.unwrap();
+        assert_test_values_eq(&taken1, &TestValue::alice());
+        assert_test_values_eq(&taken2, &TestValue::bob());
+
+        // Verify data removed from both trees after transaction
+        assert!(!tree1.contains_key(&1).unwrap());
+        assert!(!tree2.contains_key(&2).unwrap());
+    }
+
+    #[test]
     fn test_multi_tree_transaction_two_trees() {
         let db = create_test_db().unwrap();
         let tree1 = db.get_tree::<TestSchema1>().unwrap();
