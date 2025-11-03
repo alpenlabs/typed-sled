@@ -67,6 +67,19 @@ impl<S: Schema> SledTree<S> {
         Ok(())
     }
 
+    /// Removes a key-value pair from the tree and returns the previous value.
+    pub fn take(&self, key: &S::Key) -> Result<Option<S::Value>> {
+        let key = key.encode_key()?;
+        let old_value = self.inner.remove(key)?;
+
+        self.inner.flush()?;
+
+        Ok(old_value
+            .as_deref()
+            .map(|v| S::Value::decode_value(v))
+            .transpose()?)
+    }
+
     /// Returns true if the tree contains no key-value pairs.
     pub fn is_empty(&self) -> bool {
         self.inner.is_empty()
@@ -185,6 +198,18 @@ impl<S: Schema> SledTransactionalTree<S> {
         self.inner.remove(key)?;
         self.inner.flush();
         Ok(())
+    }
+
+    /// Removes a key-value pair within the transaction and returns the previous value.
+    pub fn take(&self, key: &S::Key) -> Result<Option<S::Value>> {
+        let key = key.encode_key()?;
+        let old_value = self.inner.remove(key)?;
+        self.inner.flush();
+
+        Ok(old_value
+            .as_deref()
+            .map(|v| S::Value::decode_value(v))
+            .transpose()?)
     }
 }
 
@@ -432,6 +457,56 @@ mod tests {
 
         // Remove non-existent key should not error
         tree.remove(&999).unwrap();
+    }
+
+    #[test]
+    fn test_take_operations() {
+        let tree = create_test_tree().unwrap();
+
+        // Insert and verify
+        tree.insert(&1, &TestValue::alice()).unwrap();
+        assert!(tree.contains_key(&1).unwrap());
+
+        // Take and verify returned value
+        let taken = tree.take(&1).unwrap();
+        assert!(taken.is_some());
+        assert_test_values_eq(&taken.unwrap(), &TestValue::alice());
+
+        // Verify key is removed
+        assert!(!tree.contains_key(&1).unwrap());
+        assert!(tree.get(&1).unwrap().is_none());
+
+        // Take non-existent key should return None
+        let non_existent = tree.take(&999).unwrap();
+        assert!(non_existent.is_none());
+    }
+
+    #[test]
+    fn test_take_multiple_values() {
+        let tree = create_test_tree().unwrap();
+
+        // Insert multiple values
+        tree.insert(&1, &TestValue::alice()).unwrap();
+        tree.insert(&2, &TestValue::bob()).unwrap();
+        tree.insert(&3, &TestValue::charlie()).unwrap();
+
+        // Take middle value
+        let taken = tree.take(&2).unwrap().unwrap();
+        assert_test_values_eq(&taken, &TestValue::bob());
+
+        // Verify other values still exist
+        assert!(tree.contains_key(&1).unwrap());
+        assert!(!tree.contains_key(&2).unwrap());
+        assert!(tree.contains_key(&3).unwrap());
+
+        // Take remaining values
+        let taken1 = tree.take(&1).unwrap().unwrap();
+        let taken3 = tree.take(&3).unwrap().unwrap();
+        assert_test_values_eq(&taken1, &TestValue::alice());
+        assert_test_values_eq(&taken3, &TestValue::charlie());
+
+        // Tree should be empty
+        assert!(tree.is_empty());
     }
 
     #[test]
