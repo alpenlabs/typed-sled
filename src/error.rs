@@ -22,11 +22,91 @@ pub enum Error {
     /// CAS error
     #[error("sled cas: {0}")]
     CASError(#[from] CompareAndSwapError),
+
+    /// Custom abort error for transactions
+    #[error("abort: {0}")]
+    Abort(Box<dyn std::error::Error + Send + Sync + 'static>),
 }
 
 impl From<Error> for ConflictableTransactionError<Error> {
     fn from(value: Error) -> Self {
         ConflictableTransactionError::Abort(value)
+    }
+}
+
+impl Error {
+    /// Creates an abort error from any error type.
+    ///
+    /// This is useful for aborting transactions with custom application errors.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use typed_sled::error::Error;
+    ///
+    /// #[derive(Debug, thiserror::Error)]
+    /// #[error("insufficient balance")]
+    /// struct InsufficientBalance;
+    ///
+    /// let error = Error::abort(InsufficientBalance);
+    /// ```
+    pub fn abort<E: std::error::Error + Send + Sync + 'static>(err: E) -> Self {
+        Error::Abort(Box::new(err))
+    }
+
+    /// Attempts to downcast the abort error to a specific type, returning a reference.
+    ///
+    /// Returns `None` if the error is not an `Abort` variant or if the downcast fails.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use typed_sled::error::Error;
+    ///
+    /// #[derive(Debug, thiserror::Error)]
+    /// #[error("insufficient balance")]
+    /// struct InsufficientBalance;
+    ///
+    /// let error = Error::abort(InsufficientBalance);
+    /// if let Some(app_err) = error.downcast_abort_ref::<InsufficientBalance>() {
+    ///     // Handle the specific error
+    /// }
+    /// ```
+    pub fn downcast_abort_ref<E: std::error::Error + 'static>(&self) -> Option<&E> {
+        match self {
+            Error::Abort(boxed) => boxed.downcast_ref::<E>(),
+            _ => None,
+        }
+    }
+
+    /// Attempts to downcast the abort error to a specific type, consuming self.
+    ///
+    /// Returns `Err(Self)` if the error is not an `Abort` variant or if the downcast fails.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use typed_sled::error::Error;
+    ///
+    /// #[derive(Debug, thiserror::Error, PartialEq)]
+    /// #[error("insufficient balance")]
+    /// struct InsufficientBalance;
+    ///
+    /// let error = Error::abort(InsufficientBalance);
+    /// match error.downcast_abort::<InsufficientBalance>() {
+    ///     Ok(app_err) => {
+    ///         // Handle the specific error
+    ///     }
+    ///     Err(original_error) => {
+    ///         // Not the expected error type
+    ///     }
+    /// }
+    /// ```
+    pub fn downcast_abort<E: std::error::Error + 'static>(self) -> std::result::Result<E, Self> {
+        match self {
+            Error::Abort(boxed) => boxed.downcast::<E>().map(|b| *b).map_err(Error::Abort),
+            other => Err(other),
+        }
     }
 }
 
@@ -222,6 +302,167 @@ mod tests {
         match deserialization_error {
             Error::CodecError(CodecError::DeserializationFailed { .. }) => {} // Expected
             _ => panic!("Expected CodecError::DeserializationFailed variant"),
+        }
+    }
+
+    // Custom error types for testing abort functionality
+    #[derive(Debug, thiserror::Error, PartialEq)]
+    #[error("insufficient balance: need {need}, have {have}")]
+    struct InsufficientBalance {
+        need: u64,
+        have: u64,
+    }
+
+    #[derive(Debug, thiserror::Error, PartialEq)]
+    #[error("invalid state: {0}")]
+    struct InvalidState(String);
+
+    #[test]
+    fn test_abort_error_creation() {
+        let custom_error = InsufficientBalance {
+            need: 100,
+            have: 50,
+        };
+
+        let error = Error::abort(custom_error);
+
+        match error {
+            Error::Abort(_) => {} // Expected
+            _ => panic!("Expected Abort variant"),
+        }
+    }
+
+    #[test]
+    fn test_abort_error_downcast_ref_success() {
+        let custom_error = InsufficientBalance {
+            need: 100,
+            have: 50,
+        };
+
+        let error = Error::abort(custom_error);
+
+        let downcasted = error.downcast_abort_ref::<InsufficientBalance>();
+        assert!(downcasted.is_some());
+
+        let app_err = downcasted.unwrap();
+        assert_eq!(app_err.need, 100);
+        assert_eq!(app_err.have, 50);
+    }
+
+    #[test]
+    fn test_abort_error_downcast_ref_wrong_type() {
+        let custom_error = InsufficientBalance {
+            need: 100,
+            have: 50,
+        };
+
+        let error = Error::abort(custom_error);
+
+        // Try to downcast to wrong type
+        let downcasted = error.downcast_abort_ref::<InvalidState>();
+        assert!(downcasted.is_none());
+    }
+
+    #[test]
+    fn test_abort_error_downcast_ref_not_abort_variant() {
+        let error = Error::CodecError(CodecError::InvalidKeyLength {
+            schema: "test",
+            expected: 4,
+            actual: 2,
+        });
+
+        let downcasted = error.downcast_abort_ref::<InsufficientBalance>();
+        assert!(downcasted.is_none());
+    }
+
+    #[test]
+    fn test_abort_error_downcast_owned_success() {
+        let custom_error = InsufficientBalance {
+            need: 100,
+            have: 50,
+        };
+
+        let error = Error::abort(custom_error);
+
+        let downcasted = error.downcast_abort::<InsufficientBalance>();
+        assert!(downcasted.is_ok());
+
+        let app_err = downcasted.unwrap();
+        assert_eq!(
+            app_err,
+            InsufficientBalance {
+                need: 100,
+                have: 50
+            }
+        );
+    }
+
+    #[test]
+    fn test_abort_error_downcast_owned_wrong_type() {
+        let custom_error = InsufficientBalance {
+            need: 100,
+            have: 50,
+        };
+
+        let error = Error::abort(custom_error);
+
+        // Try to downcast to wrong type
+        let downcasted = error.downcast_abort::<InvalidState>();
+        assert!(downcasted.is_err());
+
+        // Should get the original error back
+        let original = downcasted.unwrap_err();
+        match original {
+            Error::Abort(_) => {} // Expected - still an Abort with the original type
+            _ => panic!("Expected Abort variant"),
+        }
+    }
+
+    #[test]
+    fn test_abort_error_downcast_owned_not_abort_variant() {
+        let error = Error::CodecError(CodecError::InvalidKeyLength {
+            schema: "test",
+            expected: 4,
+            actual: 2,
+        });
+
+        let downcasted = error.downcast_abort::<InsufficientBalance>();
+        assert!(downcasted.is_err());
+
+        let original = downcasted.unwrap_err();
+        match original {
+            Error::CodecError(_) => {} // Expected - original variant preserved
+            _ => panic!("Expected CodecError variant"),
+        }
+    }
+
+    #[test]
+    fn test_abort_error_display() {
+        let custom_error = InsufficientBalance {
+            need: 100,
+            have: 50,
+        };
+
+        let error = Error::abort(custom_error);
+        let display_string = format!("{}", error);
+
+        assert!(display_string.contains("abort"));
+        assert!(display_string.contains("insufficient balance"));
+    }
+
+    #[test]
+    fn test_abort_error_into_conflictable() {
+        let custom_error = InsufficientBalance {
+            need: 100,
+            have: 50,
+        };
+
+        let error = Error::abort(custom_error);
+        let conflictable: ConflictableTransactionError<Error> = error.into();
+
+        match conflictable {
+            ConflictableTransactionError::Abort(Error::Abort(_)) => {} // Expected
+            _ => panic!("Expected Abort variant"),
         }
     }
 }
