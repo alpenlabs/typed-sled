@@ -525,4 +525,134 @@ mod tests {
         let const_default = ConstantBackoff::default();
         assert_eq!(const_default.delay_ms, 100);
     }
+
+    // Custom error type for testing abort functionality
+    #[derive(Debug, thiserror::Error, PartialEq)]
+    #[error("insufficient balance: need {need}, have {have}")]
+    struct InsufficientBalance {
+        need: u64,
+        have: u64,
+    }
+
+    #[test]
+    fn test_transaction_abort_with_custom_error() {
+        let db = create_test_db().unwrap();
+        let tree1 = db.get_tree::<TestSchema1>().unwrap();
+
+        // Insert initial balance
+        tree1.insert(&1, &TestValue::alice()).unwrap();
+
+        let result: TransactionResult<(), crate::error::Error> =
+            (&tree1,).transaction(|(tx_tree1,)| {
+                // Try to perform an operation that should fail
+                let balance = tx_tree1.get(&1)?;
+                assert!(balance.is_some());
+
+                // Simulate insufficient balance scenario
+                let custom_error = InsufficientBalance {
+                    need: 100,
+                    have: 50,
+                };
+
+                // Abort the transaction with custom error
+                Err(crate::error::Error::abort(custom_error).into())
+            });
+
+        // Transaction should fail with abort
+        assert!(result.is_err());
+
+        match result {
+            Err(TransactionError::Abort(err)) => {
+                // Verify we can downcast to the original error type
+                let downcasted = err.downcast_abort_ref::<InsufficientBalance>();
+                assert!(downcasted.is_some());
+
+                let insufficient_balance = downcasted.unwrap();
+                assert_eq!(insufficient_balance.need, 100);
+                assert_eq!(insufficient_balance.have, 50);
+            }
+            _ => panic!("Expected TransactionError::Abort"),
+        }
+
+        // Original data should still be present (transaction was aborted)
+        assert!(tree1.contains_key(&1).unwrap());
+    }
+
+    #[test]
+    fn test_transaction_abort_with_retry_no_retry_on_custom_abort() {
+        let db = create_test_db().unwrap();
+        let tree1 = db.get_tree::<TestSchema1>().unwrap();
+
+        let backoff = ConstantBackoff::new(1);
+        let mut attempt_count = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let attempt_count_clone = attempt_count.clone();
+
+        let result: TransactionResult<(), crate::error::Error> =
+            (&tree1,).transaction_with_retry(&backoff, 3, move |(tx_tree1,)| {
+                // Track attempt count
+                attempt_count_clone.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+
+                // Insert some data
+                let _ = tx_tree1.insert(&1, &TestValue::alice());
+
+                // Abort with custom error
+                let custom_error = InsufficientBalance {
+                    need: 200,
+                    have: 100,
+                };
+
+                Err(crate::error::Error::abort(custom_error).into())
+            });
+
+        // Should fail immediately on abort without retries
+        assert!(result.is_err());
+        assert!(matches!(result, Err(TransactionError::Abort(_))));
+
+        // Verify it only attempted once (no retries on abort)
+        let attempts = std::sync::Arc::get_mut(&mut attempt_count)
+            .unwrap()
+            .load(std::sync::atomic::Ordering::SeqCst);
+        assert_eq!(attempts, 1, "Transaction should not retry on custom abort");
+
+        // Data should not be persisted due to abort
+        assert!(!tree1.contains_key(&1).unwrap());
+    }
+
+    #[test]
+    fn test_transaction_abort_downcast_owned() {
+        let db = create_test_db().unwrap();
+        let tree1 = db.get_tree::<TestSchema1>().unwrap();
+
+        let result: TransactionResult<(), crate::error::Error> =
+            (&tree1,).transaction(|(tx_tree1,)| {
+                let _ = tx_tree1.insert(&1, &TestValue::alice());
+
+                let custom_error = InsufficientBalance {
+                    need: 300,
+                    have: 150,
+                };
+
+                Err(crate::error::Error::abort(custom_error).into())
+            });
+
+        assert!(result.is_err());
+
+        match result {
+            Err(TransactionError::Abort(err)) => {
+                // Test owned downcast
+                let downcasted = err.downcast_abort::<InsufficientBalance>();
+                assert!(downcasted.is_ok());
+
+                let insufficient_balance = downcasted.unwrap();
+                assert_eq!(
+                    insufficient_balance,
+                    InsufficientBalance {
+                        need: 300,
+                        have: 150
+                    }
+                );
+            }
+            _ => panic!("Expected TransactionError::Abort"),
+        }
+    }
 }
