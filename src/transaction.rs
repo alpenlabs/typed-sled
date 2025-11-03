@@ -330,8 +330,8 @@ mod tests {
         let db = create_test_db().unwrap();
         let tree1 = db.get_tree::<TestSchema1>().unwrap();
 
-        let result: TransactionResult<Option<TestValue>, crate::error::Error> =
-            (&tree1,).transaction(|(tx_tree1,)| {
+        let result: TransactionResult<Option<TestValue>, crate::error::Error> = (&tree1,)
+            .transaction(|(tx_tree1,)| {
                 let taken = tx_tree1.take(&999)?;
                 assert!(taken.is_none());
                 Ok(taken)
