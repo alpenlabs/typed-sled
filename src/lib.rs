@@ -16,10 +16,12 @@
 //! ## Example
 //!
 //! ```rust,no_run
-//! use borsh::{BorshDeserialize, BorshSerialize};
+//! use rkyv::rancor::Error as RkyvError;
+//! use rkyv::util::AlignedVec;
+//! use rkyv::{Archive, Deserialize, Serialize, from_bytes, to_bytes};
 //! use typed_sled::{CodecError, Schema, SledDb, TreeName, ValueCodec, error::Result};
 //!
-//! #[derive(BorshSerialize, BorshDeserialize, Debug)]
+//! #[derive(Archive, Serialize, Deserialize, Debug)]
 //! struct User {
 //!     id: u32,
 //!     name: String,
@@ -36,13 +38,17 @@
 //!
 //! impl ValueCodec<UserSchema> for User {
 //!     fn encode_value(&self) -> typed_sled::CodecResult<Vec<u8>> {
-//!         borsh::to_vec(self).map_err(|e| CodecError::SerializationFailed {
-//!             schema: UserSchema::TREE_NAME.0,
-//!             source: e.into(),
-//!         })
+//!         to_bytes::<RkyvError>(self)
+//!             .map(|bytes| bytes.into_vec())
+//!             .map_err(|e| CodecError::SerializationFailed {
+//!                 schema: UserSchema::TREE_NAME.0,
+//!                 source: e.into(),
+//!             })
 //!     }
 //!     fn decode_value(buf: &[u8]) -> typed_sled::CodecResult<Self> {
-//!         borsh::from_slice(buf).map_err(|e| CodecError::DeserializationFailed {
+//!         let mut aligned = AlignedVec::<16>::with_capacity(buf.len());
+//!         aligned.extend_from_slice(buf);
+//!         from_bytes::<User, RkyvError>(&aligned).map_err(|e| CodecError::DeserializationFailed {
 //!             schema: UserSchema::TREE_NAME.0,
 //!             source: e.into(),
 //!         })

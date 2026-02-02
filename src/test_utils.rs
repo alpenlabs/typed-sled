@@ -3,12 +3,14 @@
 //! This module provides common test infrastructure that can be reused across
 //! all test modules, eliminating code duplication and ensuring consistency.
 
-use borsh::{BorshDeserialize, BorshSerialize};
+use rkyv::rancor::Error as RkyvError;
+use rkyv::util::AlignedVec;
+use rkyv::{Archive, Deserialize, Serialize, from_bytes, to_bytes};
 
 use crate::{CodecError, CodecResult, Schema, SledDb, TreeName, ValueCodec};
 
 /// Common test value type used across all tests.
-#[derive(BorshSerialize, BorshDeserialize, Debug, Clone, PartialEq)]
+#[derive(Archive, Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub(crate) struct TestValue {
     pub id: u32,
     pub name: String,
@@ -91,16 +93,22 @@ where
     S: Schema<Key = u32, Value = TestValue>,
 {
     fn encode_value(&self) -> CodecResult<Vec<u8>> {
-        borsh::to_vec(self).map_err(|e| CodecError::SerializationFailed {
-            schema: S::TREE_NAME.0,
-            source: e.into(),
-        })
+        to_bytes::<RkyvError>(self)
+            .map(|bytes| bytes.into_vec())
+            .map_err(|e| CodecError::SerializationFailed {
+                schema: S::TREE_NAME.0,
+                source: e.into(),
+            })
     }
 
     fn decode_value(buf: &[u8]) -> CodecResult<Self> {
-        borsh::from_slice(buf).map_err(|e| CodecError::DeserializationFailed {
-            schema: S::TREE_NAME.0,
-            source: e.into(),
+        let mut aligned = AlignedVec::<16>::with_capacity(buf.len());
+        aligned.extend_from_slice(buf);
+        from_bytes::<TestValue, RkyvError>(&aligned).map_err(|e| {
+            CodecError::DeserializationFailed {
+                schema: S::TREE_NAME.0,
+                source: e.into(),
+            }
         })
     }
 }

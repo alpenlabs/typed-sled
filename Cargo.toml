@@ -17,7 +17,7 @@ rust.unreachable_pub = "warn"
 rust.unused_crate_dependencies = "deny"
 rust.unused_must_use = "deny"
 rust.unexpected_cfgs = { level = "warn", check-cfg = [
-    'cfg(coverage, coverage_nightly)',
+  'cfg(coverage, coverage_nightly)',
 ] }
 rust.missing_docs = "warn"
 rustdoc.all = "warn"
@@ -31,7 +31,7 @@ sled = "0.34.7"
 thiserror = "1.0"
 
 [dev-dependencies]
-borsh = { version = "1.5", features = ["derive"] }
+rkyv = { version = "0.8", features = ["bytecheck"] }
 
 [profile.release]
 opt-level = "z"   # Optimized for size, use 3 for speed
