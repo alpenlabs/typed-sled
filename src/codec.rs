@@ -1,3 +1,7 @@
+use std::{borrow::Borrow, marker::PhantomData, ops::Deref};
+
+use rkyv::{Portable, api::high::HighValidator, bytecheck::CheckBytes, rancor::Error as RkyvError};
+use sled::IVec;
 use thiserror::Error;
 
 use crate::schema::Schema;
@@ -45,6 +49,80 @@ pub enum CodecError {
 /// Result type for codec operations.
 pub type CodecResult<T> = Result<T, CodecError>;
 
+/// Zero-copy view over an archived `rkyv` value backed by an owned byte buffer.
+///
+/// The buffer must satisfy `rkyv`'s alignment requirements. When bytes come
+/// from an unaligned source such as `sled::IVec`, copy them into an
+/// [`rkyv::util::AlignedVec`] before constructing the view.
+#[derive(Clone)]
+pub struct RkyvView<B, P> {
+    buf: B,
+    _phantom: PhantomData<fn() -> P>,
+}
+
+impl<B, P> RkyvView<B, P>
+where
+    B: AsRef<[u8]>,
+    P: Portable + for<'a> CheckBytes<HighValidator<'a, RkyvError>>,
+{
+    /// Validates the archived bytes and creates a new zero-copy view.
+    pub fn try_new(buf: B) -> Result<Self, RkyvError> {
+        rkyv::access::<P, RkyvError>(buf.as_ref())?;
+        Ok(Self {
+            buf,
+            _phantom: PhantomData,
+        })
+    }
+
+    /// Returns the owned buffer backing this archived view.
+    pub fn into_inner(self) -> B {
+        self.buf
+    }
+}
+
+impl<B, P> AsRef<P> for RkyvView<B, P>
+where
+    B: AsRef<[u8]>,
+    P: Portable + for<'a> CheckBytes<HighValidator<'a, RkyvError>>,
+{
+    fn as_ref(&self) -> &P {
+        rkyv::access::<P, RkyvError>(self.buf.as_ref())
+            .expect("RkyvView validates archived bytes at construction")
+    }
+}
+
+impl<B, P> Borrow<P> for RkyvView<B, P>
+where
+    B: AsRef<[u8]>,
+    P: Portable + for<'a> CheckBytes<HighValidator<'a, RkyvError>>,
+{
+    fn borrow(&self) -> &P {
+        self.as_ref()
+    }
+}
+
+impl<B, P> Deref for RkyvView<B, P>
+where
+    B: AsRef<[u8]>,
+    P: Portable + for<'a> CheckBytes<HighValidator<'a, RkyvError>>,
+{
+    type Target = P;
+
+    fn deref(&self) -> &Self::Target {
+        self.as_ref()
+    }
+}
+
+impl<B, P> std::fmt::Debug for RkyvView<B, P>
+where
+    B: AsRef<[u8]>,
+    P: Portable + std::fmt::Debug + for<'a> CheckBytes<HighValidator<'a, RkyvError>>,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_tuple("RkyvView").field(self.as_ref()).finish()
+    }
+}
+
 /// Trait for encoding and decoding keys for a specific schema.
 pub trait KeyCodec<S: Schema>: Sized {
     /// Encodes the key into bytes.
@@ -55,10 +133,14 @@ pub trait KeyCodec<S: Schema>: Sized {
 
 /// Trait for encoding and decoding values for a specific schema.
 pub trait ValueCodec<S: Schema>: Sized {
+    /// The value representation returned by [`ValueCodec::decode_value`].
+    type Decoded;
+
     /// Encodes the value into bytes.
     fn encode_value(&self) -> CodecResult<Vec<u8>>;
-    /// Decodes the value from bytes.
-    fn decode_value(buf: &[u8]) -> CodecResult<Self>;
+
+    /// Decodes the value from the raw bytes stored in sled.
+    fn decode_value(buf: IVec) -> CodecResult<Self::Decoded>;
 }
 
 macro_rules! derive_key_codec_for_integers {

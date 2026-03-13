@@ -7,10 +7,12 @@ use sled::{IVec, Iter, Tree, transaction::TransactionalTree};
 
 use crate::{KeyCodec, Schema, ValueCodec, batch::SledBatch, error::Result};
 
+type DecodedValue<S> = <<S as Schema>::Value as ValueCodec<S>>::Decoded;
+
 /// Decodes a raw key-value pair into typed schema types.
-fn decode_pair<S: Schema>((k, v): (IVec, IVec)) -> Result<(S::Key, S::Value)> {
+fn decode_pair<S: Schema>((k, v): (IVec, IVec)) -> Result<(S::Key, DecodedValue<S>)> {
     let key = S::Key::decode_key(&k)?;
-    let value = S::Value::decode_value(&v)?;
+    let value = S::Value::decode_value(v)?;
     Ok((key, value))
 }
 
@@ -51,11 +53,10 @@ impl<S: Schema> SledTree<S> {
     }
 
     /// Retrieves a value for the given key.
-    pub fn get(&self, key: &S::Key) -> Result<Option<S::Value>> {
+    pub fn get(&self, key: &S::Key) -> Result<Option<DecodedValue<S>>> {
         let key = key.encode_key()?;
         let val = self.inner.get(key)?;
-        let val = val.as_deref();
-        Ok(val.map(|v| S::Value::decode_value(v)).transpose()?)
+        Ok(val.map(S::Value::decode_value).transpose()?)
     }
 
     /// Removes a key-value pair from the tree.
@@ -68,16 +69,13 @@ impl<S: Schema> SledTree<S> {
     }
 
     /// Removes a key-value pair from the tree and returns the previous value.
-    pub fn take(&self, key: &S::Key) -> Result<Option<S::Value>> {
+    pub fn take(&self, key: &S::Key) -> Result<Option<DecodedValue<S>>> {
         let key = key.encode_key()?;
         let old_value = self.inner.remove(key)?;
 
         self.inner.flush()?;
 
-        Ok(old_value
-            .as_deref()
-            .map(|v| S::Value::decode_value(v))
-            .transpose()?)
+        Ok(old_value.map(S::Value::decode_value).transpose()?)
     }
 
     /// Returns true if the tree contains no key-value pairs.
@@ -92,12 +90,12 @@ impl<S: Schema> SledTree<S> {
     }
 
     /// Returns the first key-value pair in the tree.
-    pub fn first(&self) -> Result<Option<(S::Key, S::Value)>> {
+    pub fn first(&self) -> Result<Option<(S::Key, DecodedValue<S>)>> {
         self.inner.first()?.map(decode_pair::<S>).transpose()
     }
 
     /// Returns the last key-value pair in the tree.
-    pub fn last(&self) -> Result<Option<(S::Key, S::Value)>> {
+    pub fn last(&self) -> Result<Option<(S::Key, DecodedValue<S>)>> {
         self.inner.last()?.map(decode_pair::<S>).transpose()
     }
 
@@ -179,11 +177,10 @@ impl<S: Schema> SledTransactionalTree<S> {
     }
 
     /// Retrieves a value for the given key within the transaction.
-    pub fn get(&self, key: &S::Key) -> Result<Option<S::Value>> {
+    pub fn get(&self, key: &S::Key) -> Result<Option<DecodedValue<S>>> {
         let key = key.encode_key()?;
         let val = self.inner.get(key)?;
-        let val = val.as_deref();
-        Ok(val.map(|v| S::Value::decode_value(v)).transpose()?)
+        Ok(val.map(S::Value::decode_value).transpose()?)
     }
 
     /// Returns `true` if the `SledTree` contains a value for the specified key
@@ -201,15 +198,12 @@ impl<S: Schema> SledTransactionalTree<S> {
     }
 
     /// Removes a key-value pair within the transaction and returns the previous value.
-    pub fn take(&self, key: &S::Key) -> Result<Option<S::Value>> {
+    pub fn take(&self, key: &S::Key) -> Result<Option<DecodedValue<S>>> {
         let key = key.encode_key()?;
         let old_value = self.inner.remove(key)?;
         self.inner.flush();
 
-        Ok(old_value
-            .as_deref()
-            .map(|v| S::Value::decode_value(v))
-            .transpose()?)
+        Ok(old_value.map(S::Value::decode_value).transpose()?)
     }
 }
 
@@ -229,7 +223,7 @@ impl<S: Schema> std::fmt::Debug for SledTreeIter<S> {
 }
 
 impl<S: Schema> Iterator for SledTreeIter<S> {
-    type Item = Result<(S::Key, S::Value)>;
+    type Item = Result<(S::Key, DecodedValue<S>)>;
 
     fn next(&mut self) -> Option<Self::Item> {
         self.inner
@@ -248,11 +242,57 @@ impl<S: Schema> DoubleEndedIterator for SledTreeIter<S> {
 
 #[cfg(test)]
 mod tests {
+    use rkyv::rancor::Error as RkyvError;
+    use rkyv::util::AlignedVec;
+    use rkyv::{Archive, Serialize};
+    use sled::IVec;
+
     use super::*;
-    use crate::test_utils::*;
+    use crate::{CodecError, KeyCodec, RkyvView, TreeName, test_utils::*};
 
     fn create_test_tree() -> Result<SledTree<TestSchema1>> {
         create_temp_tree::<TestSchema1>()
+    }
+
+    #[derive(Archive, Serialize, Debug, PartialEq)]
+    struct ArchivedTestValue {
+        block_height: u64,
+        flags: u32,
+    }
+
+    #[derive(Debug, Clone)]
+    struct ArchivedTestSchema;
+
+    impl Schema for ArchivedTestSchema {
+        const TREE_NAME: TreeName = TreeName("archived_test");
+        type Key = u32;
+        type Value = ArchivedTestValue;
+    }
+
+    impl ValueCodec<ArchivedTestSchema> for ArchivedTestValue {
+        type Decoded = RkyvView<AlignedVec, <Self as Archive>::Archived>;
+
+        fn encode_value(&self) -> crate::CodecResult<Vec<u8>> {
+            rkyv::to_bytes::<RkyvError>(self)
+                .map(|bytes| bytes.into_vec())
+                .map_err(|source| CodecError::SerializationFailed {
+                    schema: ArchivedTestSchema::TREE_NAME.0,
+                    source: source.into(),
+                })
+        }
+
+        fn decode_value(buf: IVec) -> crate::CodecResult<Self::Decoded> {
+            let mut aligned = AlignedVec::with_capacity(buf.len());
+            aligned.extend_from_slice(buf.as_ref());
+            RkyvView::try_new(aligned).map_err(|source| CodecError::DeserializationFailed {
+                schema: ArchivedTestSchema::TREE_NAME.0,
+                source: source.into(),
+            })
+        }
+    }
+
+    fn create_archived_test_tree() -> Result<SledTree<ArchivedTestSchema>> {
+        create_temp_tree::<ArchivedTestSchema>()
     }
 
     #[test]
@@ -655,5 +695,47 @@ mod tests {
         let items = items.unwrap();
         assert_eq!(items.len(), 1);
         assert_eq!(items[0].0, 5);
+    }
+
+    #[test]
+    fn test_rkyv_view_roundtrip() {
+        let tree = create_archived_test_tree().unwrap();
+        let expected = ArchivedTestValue {
+            block_height: 7,
+            flags: 9,
+        };
+
+        tree.insert(&1, &expected).unwrap();
+
+        let retrieved = tree.get(&1).unwrap().unwrap();
+        assert_eq!(retrieved.block_height, expected.block_height);
+        assert_eq!(retrieved.flags, expected.flags);
+
+        let first = tree.first().unwrap().unwrap();
+        assert_eq!(first.0, 1);
+        assert_eq!(first.1.block_height, expected.block_height);
+        assert_eq!(first.1.flags, expected.flags);
+    }
+
+    #[test]
+    fn test_rkyv_view_rejects_invalid_bytes() {
+        let tree = create_archived_test_tree().unwrap();
+        let key = <u32 as KeyCodec<ArchivedTestSchema>>::encode_key(&1_u32).unwrap();
+
+        tree.inner.insert(key, vec![1_u8, 2, 3]).unwrap();
+        tree.inner.flush().unwrap();
+
+        let err = match tree.get(&1) {
+            Ok(_) => panic!("expected deserialization error"),
+            Err(err) => err,
+        };
+        match err {
+            crate::error::Error::CodecError(CodecError::DeserializationFailed {
+                schema, ..
+            }) => {
+                assert_eq!(schema, ArchivedTestSchema::TREE_NAME.0);
+            }
+            other => panic!("expected deserialization error, got {other:?}"),
+        }
     }
 }

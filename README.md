@@ -58,6 +58,8 @@ impl Schema for UserSchema {
 
 // Implement serialization for your value type
 impl ValueCodec<UserSchema> for User {
+    type Decoded = Self;
+
     fn encode_value(&self) -> typed_sled::CodecResult<Vec<u8>> {
         to_bytes::<RkyvError>(self)
             .map(|bytes| bytes.into_vec())
@@ -67,9 +69,9 @@ impl ValueCodec<UserSchema> for User {
             })
     }
 
-    fn decode_value(buf: &[u8]) -> typed_sled::CodecResult<Self> {
+    fn decode_value(buf: sled::IVec) -> typed_sled::CodecResult<Self::Decoded> {
         let mut aligned = AlignedVec::<16>::with_capacity(buf.len());
-        aligned.extend_from_slice(buf);
+        aligned.extend_from_slice(buf.as_ref());
         from_bytes::<User, RkyvError>(&aligned).map_err(|e| CodecError::DeserializationFailed {
             schema: UserSchema::TREE_NAME.0,
             source: e.into(),
@@ -117,11 +119,13 @@ impl Schema for SettingsSchema {
 }
 
 impl ValueCodec<SettingsSchema> for String {
+    type Decoded = Self;
+
     fn encode_value(&self) -> typed_sled::CodecResult<Vec<u8>> {
         Ok(self.as_bytes().to_vec())
     }
 
-    fn decode_value(buf: &[u8]) -> typed_sled::CodecResult<Self> {
+    fn decode_value(buf: sled::IVec) -> typed_sled::CodecResult<Self::Decoded> {
         String::from_utf8(buf.to_vec()).map_err(|e| CodecError::DeserializationFailed {
             schema: SettingsSchema::TREE_NAME.0,
             source: e.into(),
