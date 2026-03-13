@@ -6,6 +6,7 @@
 use rkyv::rancor::Error as RkyvError;
 use rkyv::util::AlignedVec;
 use rkyv::{Archive, Deserialize, Serialize, from_bytes, to_bytes};
+use sled::IVec;
 
 use crate::{CodecError, CodecResult, Schema, SledDb, TreeName, ValueCodec};
 
@@ -92,6 +93,8 @@ impl<S> ValueCodec<S> for TestValue
 where
     S: Schema<Key = u32, Value = TestValue>,
 {
+    type Decoded = Self;
+
     fn encode_value(&self) -> CodecResult<Vec<u8>> {
         to_bytes::<RkyvError>(self)
             .map(|bytes| bytes.into_vec())
@@ -101,9 +104,9 @@ where
             })
     }
 
-    fn decode_value(buf: &[u8]) -> CodecResult<Self> {
+    fn decode_value(buf: IVec) -> CodecResult<Self::Decoded> {
         let mut aligned = AlignedVec::<16>::with_capacity(buf.len());
-        aligned.extend_from_slice(buf);
+        aligned.extend_from_slice(buf.as_ref());
         from_bytes::<TestValue, RkyvError>(&aligned).map_err(|e| {
             CodecError::DeserializationFailed {
                 schema: S::TREE_NAME.0,
