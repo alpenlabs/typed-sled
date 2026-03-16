@@ -57,6 +57,7 @@ pub type CodecResult<T> = Result<T, CodecError>;
 #[derive(Clone)]
 pub struct RkyvView<B, P> {
     buf: B,
+    // Keep `P` covariant without implying that the view owns a `P`.
     _phantom: PhantomData<fn() -> P>,
 }
 
