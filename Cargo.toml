@@ -29,7 +29,7 @@ clippy.too_long_first_doc_paragraph = "warn"
 dashmap = "6.1.0"
 rkyv = { version = "0.8", features = ["bytecheck"] }
 sled = "0.34.7"
-thiserror = "1.0"
+thiserror = "2.0"
 
 [profile.release]
 opt-level = "z"   # Optimized for size, use 3 for speed
