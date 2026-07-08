@@ -54,8 +54,11 @@ impl Backoff for ExponentialBackoff {
     }
 
     fn next_delay_ms(&self, curr_delay_ms: u64) -> u64 {
-        let next = (curr_delay_ms as f64 * self.multiplier) as u64;
-        std::cmp::min(next, self.max_delay_ms)
+        let next = curr_delay_ms as f64 * self.multiplier;
+        if !next.is_finite() || next <= 0.0 {
+            return self.max_delay_ms;
+        }
+        std::cmp::min(next as u64, self.max_delay_ms)
     }
 }
 
